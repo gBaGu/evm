@@ -1,5 +1,5 @@
-use core::ops::{Rem, Div};
 use core::cmp::Ordering;
+use core::ops::{Div, Rem};
 use primitive_types::U256;
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
@@ -9,17 +9,28 @@ pub enum Sign {
 	NoSign,
 }
 
-const SIGN_BIT_MASK: U256 = U256([0xffffffffffffffff, 0xffffffffffffffff,
-								  0xffffffffffffffff, 0x7fffffffffffffff]);
+const SIGN_BIT_MASK: U256 = U256([
+	0xffffffffffffffff,
+	0xffffffffffffffff,
+	0xffffffffffffffff,
+	0x7fffffffffffffff,
+]);
 
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 pub struct I256(pub Sign, pub U256);
 
 impl I256 {
 	/// Zero value of I256.
-	pub fn zero() -> I256 { I256(Sign::NoSign, U256::zero()) }
+	pub fn zero() -> I256 {
+		I256(Sign::NoSign, U256::zero())
+	}
 	/// Minimum value of I256.
-	pub fn min_value() -> I256 { I256(Sign::Minus, (U256::max_value() & SIGN_BIT_MASK) + U256::from(1u64)) }
+	pub fn min_value() -> I256 {
+		I256(
+			Sign::Minus,
+			(U256::max_value() & SIGN_BIT_MASK) + U256::from(1u64),
+		)
+	}
 }
 
 impl Ord for I256 {
@@ -44,7 +55,11 @@ impl PartialOrd for I256 {
 	}
 }
 
-impl Default for I256 { fn default() -> I256 { I256::zero() } }
+impl Default for I256 {
+	fn default() -> I256 {
+		I256::zero()
+	}
+}
 impl From<U256> for I256 {
 	fn from(val: U256) -> I256 {
 		if val == U256::zero() {
@@ -88,11 +103,9 @@ impl Div for I256 {
 		}
 
 		match (self.0, other.0) {
-			(Sign::Plus, Sign::Plus) |
-			(Sign::Minus, Sign::Minus) => I256(Sign::Plus, d),
-			(Sign::Plus, Sign::Minus) |
-			(Sign::Minus, Sign::Plus) => I256(Sign::Minus, d),
-			_ => I256::zero()
+			(Sign::Plus, Sign::Plus) | (Sign::Minus, Sign::Minus) => I256(Sign::Plus, d),
+			(Sign::Plus, Sign::Minus) | (Sign::Minus, Sign::Plus) => I256(Sign::Minus, d),
+			_ => I256::zero(),
 		}
 	}
 }
@@ -104,7 +117,7 @@ impl Rem for I256 {
 		let r = (self.1 % other.1) & SIGN_BIT_MASK.into();
 
 		if r == U256::zero() {
-			return I256::zero()
+			return I256::zero();
 		}
 
 		I256(self.0, r)

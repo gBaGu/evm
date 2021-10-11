@@ -2,24 +2,23 @@
 
 #![deny(warnings)]
 #![forbid(unsafe_code, unused_variables, unused_imports)]
-
 #![cfg_attr(not(feature = "std"), no_std)]
 
 extern crate alloc;
 
-mod eval;
 mod context;
-mod interrupt;
+mod eval;
 mod handler;
+mod interrupt;
 
 pub use evm_core::*;
 
-pub use crate::context::{CreateScheme, CallScheme, Context};
+pub use crate::context::{CallScheme, Context, CreateScheme};
+pub use crate::handler::{Handler, Transfer};
 pub use crate::interrupt::{Resolve, ResolveCall, ResolveCreate};
-pub use crate::handler::{Transfer, Handler};
 
-use alloc::vec::Vec;
 use alloc::rc::Rc;
+use alloc::vec::Vec;
 
 macro_rules! step {
 	( $self:expr, $handler:expr, $return:tt $($err:path)?; $($ok:path)? ) => ({
