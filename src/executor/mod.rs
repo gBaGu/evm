@@ -6,4 +6,7 @@
 mod stack;
 pub mod traces;
 
-pub use self::stack::{MemoryStackState, StackExecutor, StackState, StackSubstateMetadata};
+pub use self::stack::{
+	MemoryStackState, Precompile, PrecompileOutput, PrecompileResult, StackExecutor, StackExitKind,
+	StackState, StackSubstateMetadata,
+};

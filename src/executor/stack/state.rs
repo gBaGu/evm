@@ -1,5 +1,5 @@
 use crate::backend::{Apply, Backend, Basic, Log};
-use crate::executor::stack::StackSubstateMetadata;
+use crate::executor::stack::{Accessed, StackSubstateMetadata};
 use crate::{ExitError, Transfer};
 use alloc::{
 	boxed::Box,
@@ -132,7 +132,7 @@ impl<'config> MemoryStackSubstate<'config> {
 		}
 		let mut reset_keys = BTreeSet::new();
 		for (address, key) in self.storages.keys() {
-			if resets.contains(&address) {
+			if resets.contains(address) {
 				reset_keys.insert((*address, *key));
 			}
 		}
@@ -152,7 +152,6 @@ impl<'config> MemoryStackSubstate<'config> {
 		mem::swap(&mut exited, self);
 
 		self.metadata.swallow_revert(exited.metadata)?;
-		self.logs.append(&mut exited.logs);
 
 		Ok(())
 	}
@@ -162,7 +161,6 @@ impl<'config> MemoryStackSubstate<'config> {
 		mem::swap(&mut exited, self);
 
 		self.metadata.swallow_discard(exited.metadata)?;
-		self.logs.append(&mut exited.logs);
 
 		Ok(())
 	}
@@ -199,7 +197,7 @@ impl<'config> MemoryStackSubstate<'config> {
 				return Some(
 					account.basic.balance == U256::zero()
 						&& account.basic.nonce == U256::zero()
-						&& code.len() == 0,
+						&& code.is_empty(),
 				);
 			}
 		}
@@ -239,6 +237,26 @@ impl<'config> MemoryStackSubstate<'config> {
 		None
 	}
 
+	pub fn is_cold(&self, address: H160) -> bool {
+		self.recursive_is_cold(&|a| a.accessed_addresses.contains(&address))
+	}
+
+	pub fn is_storage_cold(&self, address: H160, key: H256) -> bool {
+		self.recursive_is_cold(&|a: &Accessed| a.accessed_storage.contains(&(address, key)))
+	}
+
+	fn recursive_is_cold<F: Fn(&Accessed) -> bool>(&self, f: &F) -> bool {
+		let local_is_accessed = self.metadata.accessed.as_ref().map(f).unwrap_or(false);
+		if local_is_accessed {
+			false
+		} else {
+			self.parent
+				.as_ref()
+				.map(|p| p.recursive_is_cold(f))
+				.unwrap_or(true)
+		}
+	}
+
 	pub fn deleted(&self, address: H160) -> bool {
 		if self.deletes.contains(&address) {
 			return true;
@@ -251,6 +269,7 @@ impl<'config> MemoryStackSubstate<'config> {
 		false
 	}
 
+	#[allow(clippy::map_entry)]
 	fn account_mut<B: Backend>(&mut self, address: H160, backend: &B) -> &mut MemoryStackAccount {
 		if !self.accounts.contains_key(&address) {
 			let account = self
@@ -376,6 +395,8 @@ pub trait StackState<'config>: Backend {
 
 	fn is_empty(&self, address: H160) -> bool;
 	fn deleted(&self, address: H160) -> bool;
+	fn is_cold(&self, address: H160) -> bool;
+	fn is_storage_cold(&self, address: H160, key: H256) -> bool;
 
 	fn inc_nonce(&mut self, address: H160);
 	fn set_storage(&mut self, address: H160, key: H256, value: H256);
@@ -490,6 +511,14 @@ impl<'backend, 'config, B: Backend> StackState<'config> for MemoryStackState<'ba
 
 	fn deleted(&self, address: H160) -> bool {
 		self.substate.deleted(address)
+	}
+
+	fn is_cold(&self, address: H160) -> bool {
+		self.substate.is_cold(address)
+	}
+
+	fn is_storage_cold(&self, address: H160, key: H256) -> bool {
+		self.substate.is_storage_cold(address, key)
 	}
 
 	fn inc_nonce(&mut self, address: H160) {
