@@ -174,8 +174,6 @@ impl TraceTracker {
 		output: Vec<u8>,
 		reason: ExitReason,
 	) {
-		trace!("End routine, {:?}", self);
-
 		let stack_item = self
 			.traces_stack
 			.pop()
@@ -197,6 +195,8 @@ impl TraceTracker {
 			output,
 			contract,
 		};
+
+		trace!("End routine, {:?}", self);
 	}
 
 	pub fn trace_by_address(&mut self, address: &[usize]) -> Option<&mut Trace> {
