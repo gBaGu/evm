@@ -1,5 +1,5 @@
-use alloc::borrow::Cow;
 use crate::Opcode;
+use alloc::borrow::Cow;
 
 /// Trap which indicates that an `ExternalOpcode` has to be handled.
 pub type Trap = Opcode;
@@ -16,14 +16,17 @@ pub enum Capture<E, T> {
 
 /// Exit reason.
 #[derive(Clone, Debug, Eq, PartialEq)]
-#[cfg_attr(feature = "with-codec", derive(codec::Encode, codec::Decode))]
+#[cfg_attr(
+	feature = "with-codec",
+	derive(codec::Encode, codec::Decode, scale_info::TypeInfo)
+)]
 #[cfg_attr(feature = "with-serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ExitReason {
 	/// Machine has succeeded.
 	Succeed(ExitSucceed),
 	/// Machine returns a normal EVM error.
 	Error(ExitError),
-	/// Machine encountered an explict revert.
+	/// Machine encountered an explicit revert.
 	Revert(ExitRevert),
 	/// Machine encountered an error that is not supposed to be normal EVM
 	/// errors, such as requiring too much memory to execute.
@@ -33,47 +36,38 @@ pub enum ExitReason {
 impl ExitReason {
 	/// Whether the exit is succeeded.
 	pub fn is_succeed(&self) -> bool {
-		match self {
-			Self::Succeed(_) => true,
-			_ => false,
-		}
+		matches!(self, Self::Succeed(_))
 	}
 
 	/// Whether the exit is error.
 	pub fn is_error(&self) -> bool {
-		match self {
-			Self::Error(_) => true,
-			_ => false,
-		}
+		matches!(self, Self::Error(_))
 	}
 
 	/// Whether the exit is revert.
 	pub fn is_revert(&self) -> bool {
-		match self {
-			Self::Revert(_) => true,
-			_ => false,
-		}
+		matches!(self, Self::Revert(_))
 	}
 
 	/// Whether the exit is fatal.
 	pub fn is_fatal(&self) -> bool {
-		match self {
-			Self::Fatal(_) => true,
-			_ => false,
-		}
+		matches!(self, Self::Fatal(_))
 	}
 }
 
 /// Exit succeed reason.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[cfg_attr(feature = "with-codec", derive(codec::Encode, codec::Decode))]
+#[cfg_attr(
+	feature = "with-codec",
+	derive(codec::Encode, codec::Decode, scale_info::TypeInfo)
+)]
 #[cfg_attr(feature = "with-serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ExitSucceed {
-	/// Machine encountered an explict stop.
+	/// Machine encountered an explicit stop.
 	Stopped,
-	/// Machine encountered an explict return.
+	/// Machine encountered an explicit return.
 	Returned,
-	/// Machine encountered an explict suicide.
+	/// Machine encountered an explicit suicide.
 	Suicided,
 }
 
@@ -85,10 +79,13 @@ impl From<ExitSucceed> for ExitReason {
 
 /// Exit revert reason.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[cfg_attr(feature = "with-codec", derive(codec::Encode, codec::Decode))]
+#[cfg_attr(
+	feature = "with-codec",
+	derive(codec::Encode, codec::Decode, scale_info::TypeInfo)
+)]
 #[cfg_attr(feature = "with-serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ExitRevert {
-	/// Machine encountered an explict revert.
+	/// Machine encountered an explicit revert.
 	Reverted,
 }
 
@@ -100,40 +97,62 @@ impl From<ExitRevert> for ExitReason {
 
 /// Exit error reason.
 #[derive(Clone, Debug, Eq, PartialEq)]
-#[cfg_attr(feature = "with-codec", derive(codec::Encode, codec::Decode))]
+#[cfg_attr(
+	feature = "with-codec",
+	derive(codec::Encode, codec::Decode, scale_info::TypeInfo)
+)]
 #[cfg_attr(feature = "with-serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ExitError {
 	/// Trying to pop from an empty stack.
+	#[cfg_attr(feature = "with-codec", codec(index = 0))]
 	StackUnderflow,
 	/// Trying to push into a stack over stack limit.
+	#[cfg_attr(feature = "with-codec", codec(index = 1))]
 	StackOverflow,
 	/// Jump destination is invalid.
+	#[cfg_attr(feature = "with-codec", codec(index = 2))]
 	InvalidJump,
 	/// An opcode accesses memory region, but the region is invalid.
+	#[cfg_attr(feature = "with-codec", codec(index = 3))]
 	InvalidRange,
 	/// Encountered the designated invalid opcode.
+	#[cfg_attr(feature = "with-codec", codec(index = 4))]
 	DesignatedInvalid,
 	/// Call stack is too deep (runtime).
+	#[cfg_attr(feature = "with-codec", codec(index = 5))]
 	CallTooDeep,
 	/// Create opcode encountered collision (runtime).
+	#[cfg_attr(feature = "with-codec", codec(index = 6))]
 	CreateCollision,
 	/// Create init code exceeds limit (runtime).
+	#[cfg_attr(feature = "with-codec", codec(index = 7))]
 	CreateContractLimit,
+	/// Starting byte must not begin with 0xef. See [EIP-3541](https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3541.md).
+	#[cfg_attr(feature = "with-codec", codec(index = 14))]
+	InvalidCode,
 
-	///	An opcode accesses external information, but the request is off offset
-	///	limit (runtime).
+	/// An opcode accesses external information, but the request is off offset
+	/// limit (runtime).
+	#[cfg_attr(feature = "with-codec", codec(index = 8))]
 	OutOfOffset,
 	/// Execution runs out of gas (runtime).
+	#[cfg_attr(feature = "with-codec", codec(index = 9))]
 	OutOfGas,
 	/// Not enough fund to start the execution (runtime).
+	#[cfg_attr(feature = "with-codec", codec(index = 10))]
 	OutOfFund,
 
 	/// PC underflowed (unused).
+	#[allow(clippy::upper_case_acronyms)]
+	#[cfg_attr(feature = "with-codec", codec(index = 11))]
 	PCUnderflow,
+
 	/// Attempt to create an empty account (runtime, unused).
+	#[cfg_attr(feature = "with-codec", codec(index = 12))]
 	CreateEmpty,
 
 	/// Other normal errors.
+	#[cfg_attr(feature = "with-codec", codec(index = 13))]
 	Other(Cow<'static, str>),
 }
 
@@ -145,14 +164,17 @@ impl From<ExitError> for ExitReason {
 
 /// Exit fatal reason.
 #[derive(Clone, Debug, Eq, PartialEq)]
-#[cfg_attr(feature = "with-codec", derive(codec::Encode, codec::Decode))]
+#[cfg_attr(
+	feature = "with-codec",
+	derive(codec::Encode, codec::Decode, scale_info::TypeInfo)
+)]
 #[cfg_attr(feature = "with-serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ExitFatal {
 	/// The operation is not supported.
 	NotSupported,
 	/// The trap (interrupt) is unhandled.
 	UnhandledInterrupt,
-	/// The environment explictly set call errors as fatal error.
+	/// The environment explicitly set call errors as fatal error.
 	CallErrorAsFatal(ExitError),
 
 	/// Other fatal errors.
