@@ -792,7 +792,7 @@ impl<'config, 'precompile, S: StackState<'config>> Handler
         opcode: Opcode,
         stack: &Stack,
     ) -> Result<(), ExitError> {
-        // log::trace!(target: "evm", "Running opcode: {:?}, Pre gas-left: {:?}", opcode, gasometer.gas());
+        log::info!(target: "evm", "Running opcode: {:?}, Pre gas-left: {:?}", opcode, gasometer.gas());
 
         if let Some(cost) = gasometer::static_opcode_cost(opcode) {
             self.state.metadata_mut().gasometer.record_cost(cost)?;
