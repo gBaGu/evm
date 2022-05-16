@@ -161,6 +161,7 @@ impl<'config> MemoryStackSubstate<'config> {
 		mem::swap(&mut exited, self);
 
 		self.metadata.swallow_revert(exited.metadata)?;
+		self.logs.append(&mut exited.logs);
 
 		Ok(())
 	}
@@ -170,6 +171,7 @@ impl<'config> MemoryStackSubstate<'config> {
 		mem::swap(&mut exited, self);
 
 		self.metadata.swallow_discard(exited.metadata)?;
+		self.logs.append(&mut exited.logs);
 
 		Ok(())
 	}
