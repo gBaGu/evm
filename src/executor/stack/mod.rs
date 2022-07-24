@@ -74,6 +74,7 @@ pub struct StackExecutor<'config, 'precompile, S> {
             H160,
             &[u8],
             Option<u64>,
+            Option<CallScheme>,
             &Context,
         )
             -> Option<Result<(ExitSucceed, Vec<u8>, u64), ExitError>>,
@@ -100,6 +101,7 @@ impl<'config, 'precompile, S: StackState<'config>> StackExecutor<'config, 'preco
             H160,
             &[u8],
             Option<u64>,
+            Option<CallScheme>,
             &Context,
         ) -> Option<
             Result<(ExitSucceed, Vec<u8>, u64), ExitError>,
@@ -521,7 +523,7 @@ impl<'config, 'precompile, S: StackState<'config>> StackExecutor<'config, 'preco
             transfer,
             input,
             target_gas,
-            call_scheme.map_or(false, |c| c == CallScheme::StaticCall),
+            call_scheme,
             take_l64,
             take_stipend,
             context,
@@ -545,11 +547,13 @@ impl<'config, 'precompile, S: StackState<'config>> StackExecutor<'config, 'preco
         transfer: Option<Transfer>,
         input: Vec<u8>,
         target_gas: Option<u64>,
-        is_static: bool,
+        // None when transaction_call called
+        call_scheme: Option<CallScheme>,
         take_l64: bool,
         take_stipend: bool,
         context: Context,
     ) -> Capture<(ExitReason, Vec<u8>), Infallible> {
+        let is_static = call_scheme.map_or(false, |c| c == CallScheme::StaticCall);
         macro_rules! try_or_fail {
             ( $e:expr ) => {
                 match $e {
@@ -605,7 +609,7 @@ impl<'config, 'precompile, S: StackState<'config>> StackExecutor<'config, 'preco
         if let Some(ret) = self
             .precompile
             .as_mut()
-            .and_then(|e| e(code_address, &input, Some(gas_limit), &context))
+            .and_then(|e| e(code_address, &input, Some(gas_limit), call_scheme, &context))
         {
             return match ret {
                 Ok((s, out, cost)) => {
@@ -818,11 +822,11 @@ impl<'config, 'precompile, S: StackState<'config>> Handler
 
 #[cfg(test)]
 mod tests {
-    use std::{str::FromStr, collections::BTreeMap};
-    use primitive_types::{H160, U256};
-    use evm_runtime::Config;
-    use crate::backend::{MemoryAccount, MemoryVicinity, MemoryBackend};
+    use crate::backend::{MemoryAccount, MemoryBackend, MemoryVicinity};
     use crate::executor::{MemoryStackState, StackExecutor, StackSubstateMetadata};
+    use evm_runtime::Config;
+    use primitive_types::{H160, U256};
+    use std::{collections::BTreeMap, str::FromStr};
 
     fn dummy_account() -> MemoryAccount {
         MemoryAccount {
@@ -835,7 +839,10 @@ mod tests {
 
     #[test]
     fn test_call_inner_with_estimate() {
-        let config_estimate = Config { estimate: true, ..Config::istanbul() };
+        let config_estimate = Config {
+            estimate: true,
+            ..Config::istanbul()
+        };
         let config_no_estimate = Config::istanbul();
 
         let vicinity = MemoryVicinity {
@@ -852,7 +859,8 @@ mod tests {
 
         let mut state = BTreeMap::new();
         let caller_address = H160::from_str("0xf000000000000000000000000000000000000000").unwrap();
-        let contract_address = H160::from_str("0x1000000000000000000000000000000000000000").unwrap();
+        let contract_address =
+            H160::from_str("0x1000000000000000000000000000000000000000").unwrap();
         state.insert(caller_address, dummy_account());
         state.insert(
             contract_address,
@@ -865,7 +873,9 @@ mod tests {
             }
         );
 
-        let call_data = hex::decode("6057361d0000000000000000000000000000000000000000000000000000000000000000").unwrap();
+        let call_data =
+            hex::decode("6057361d0000000000000000000000000000000000000000000000000000000000000000")
+                .unwrap();
         let transact_call = |config, gas_limit| {
             let backend = MemoryBackend::new(&vicinity, state.clone());
             let metadata = StackSubstateMetadata::new(gas_limit, config);
@@ -904,7 +914,10 @@ mod tests {
 
     #[test]
     fn test_create_inner_with_estimate() {
-        let config_estimate = Config { estimate: true, ..Config::istanbul() };
+        let config_estimate = Config {
+            estimate: true,
+            ..Config::istanbul()
+        };
         let config_no_estimate = Config::istanbul();
 
         let vicinity = MemoryVicinity {
@@ -921,7 +934,8 @@ mod tests {
 
         let mut state = BTreeMap::new();
         let caller_address = H160::from_str("0xf000000000000000000000000000000000000000").unwrap();
-        let contract_address = H160::from_str("0x1000000000000000000000000000000000000000").unwrap();
+        let contract_address =
+            H160::from_str("0x1000000000000000000000000000000000000000").unwrap();
         state.insert(caller_address, dummy_account());
         state.insert(
             contract_address,
