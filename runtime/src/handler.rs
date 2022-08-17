@@ -69,8 +69,8 @@ pub trait Handler {
 	/// (or set in `accessed_addresses` / `accessed_storage_keys` via an access list
 	/// transaction).
 	/// References:
-	/// * https://eips.ethereum.org/EIPS/eip-2929
-	/// * https://eips.ethereum.org/EIPS/eip-2930
+	/// * <https://eips.ethereum.org/EIPS/eip-2929>
+	/// * <https://eips.ethereum.org/EIPS/eip-2930>
 	fn is_cold(&self, address: H160, index: Option<H256>) -> bool;
 
 	/// Set storage value of address at index.
@@ -115,7 +115,7 @@ pub trait Handler {
 		stack: &Stack,
 	) -> Result<(), ExitError>;
 	/// Handle other unknown external opcodes.
-	fn other(&mut self, _opcode: Opcode, _stack: &mut Machine) -> Result<(), ExitError> {
-		Err(ExitError::OutOfGas)
+	fn other(&mut self, opcode: Opcode, _stack: &mut Machine) -> Result<(), ExitError> {
+		Err(ExitError::InvalidCode(opcode))
 	}
 }
