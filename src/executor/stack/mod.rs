@@ -4,13 +4,16 @@ pub use self::state::{MemoryStackState, MemoryStackSubstate, StackState};
 
 use crate::gasometer::{self, Gasometer};
 use crate::{
-    Capture, Config, Context, CreateScheme, ExitError, ExitReason, ExitSucceed, Handler, Opcode,
-    Runtime, Stack, Transfer,
+    executor::traces, Capture, Config, Context, CreateScheme, ExitError, ExitReason, ExitSucceed,
+    Handler, Opcode, Runtime, Stack, Transfer,
 };
 use alloc::{rc::Rc, vec::Vec};
 use core::{cmp::min, convert::Infallible};
+use evm_runtime::CallScheme;
 use primitive_types::{H160, H256, U256};
 use sha3::{Digest, Keccak256};
+
+use super::traces::Trace;
 
 pub enum StackExitKind {
     Succeeded,
@@ -71,11 +74,13 @@ pub struct StackExecutor<'config, 'precompile, S> {
             H160,
             &[u8],
             Option<u64>,
+            Option<CallScheme>,
             &Context,
         )
             -> Option<Result<(ExitSucceed, Vec<u8>, u64), ExitError>>,
     >,
     state: S,
+    tracer: traces::TraceTracker,
 }
 
 impl<'config, 'precompile, S: StackState<'config>> StackExecutor<'config, 'precompile, S> {
@@ -85,6 +90,7 @@ impl<'config, 'precompile, S: StackState<'config>> StackExecutor<'config, 'preco
             config,
             precompile: None,
             state,
+            tracer: traces::TraceTracker::new(),
         }
     }
     /// Create a new stack-based executor with given precompiles.
@@ -95,6 +101,7 @@ impl<'config, 'precompile, S: StackState<'config>> StackExecutor<'config, 'preco
             H160,
             &[u8],
             Option<u64>,
+            Option<CallScheme>,
             &Context,
         ) -> Option<
             Result<(ExitSucceed, Vec<u8>, u64), ExitError>,
@@ -104,7 +111,11 @@ impl<'config, 'precompile, S: StackState<'config>> StackExecutor<'config, 'preco
             config,
             precompile: Some(precompile),
             state,
+            tracer: traces::TraceTracker::new(),
         }
+    }
+    pub fn take_traces(&mut self) -> Vec<Trace> {
+        self.tracer.take_traces()
     }
 
     pub fn state(&self) -> &S {
@@ -253,7 +264,7 @@ impl<'config, 'precompile, S: StackState<'config>> StackExecutor<'config, 'preco
             }),
             data,
             Some(gas_limit),
-            false,
+            None,
             false,
             false,
             context,
@@ -308,8 +319,38 @@ impl<'config, 'precompile, S: StackState<'config>> StackExecutor<'config, 'preco
             CreateScheme::Fixed(naddress) => naddress,
         }
     }
-
     fn create_inner(
+        &mut self,
+        caller: H160,
+        scheme: CreateScheme,
+        value: U256,
+        init_code: Vec<u8>,
+        target_gas: Option<u64>,
+        take_l64: bool,
+    ) -> Capture<(ExitReason, Option<H160>, Vec<u8>), Infallible> {
+        let gas_before = self.gas_left();
+        self.tracer
+            .start_create(caller, value, gas_before, init_code.clone(), scheme.clone());
+        match self._create_inner(caller, scheme, value, init_code, target_gas, take_l64) {
+            Capture::Exit((reason, contract, output)) => {
+                let output = if let Some(address) = contract {
+                    self.state.code(address)
+                } else {
+                    output
+                };
+                self.tracer.end_subroutine(
+                    gas_before.saturating_sub(self.gas_left()),
+                    contract,
+                    output.clone(),
+                    reason.clone(),
+                );
+                Capture::Exit((reason, contract, output))
+            }
+            Capture::Trap(_) => unreachable!(),
+        }
+    }
+
+    fn _create_inner(
         &mut self,
         caller: H160,
         scheme: CreateScheme,
@@ -342,14 +383,7 @@ impl<'config, 'precompile, S: StackState<'config>> StackExecutor<'config, 'preco
         }
 
         let after_gas = if take_l64 && self.config.call_l64_after_gas {
-            if self.config.estimate {
-                let initial_after_gas = self.state.metadata().gasometer.gas();
-                let diff = initial_after_gas - l64(initial_after_gas);
-                try_or_fail!(self.state.metadata_mut().gasometer.record_cost(diff));
-                self.state.metadata().gasometer.gas()
-            } else {
-                l64(self.state.metadata().gasometer.gas())
-            }
+            l64(self.state.metadata().gasometer.gas())
         } else {
             self.state.metadata().gasometer.gas()
         };
@@ -471,11 +505,55 @@ impl<'config, 'precompile, S: StackState<'config>> StackExecutor<'config, 'preco
         transfer: Option<Transfer>,
         input: Vec<u8>,
         target_gas: Option<u64>,
-        is_static: bool,
+        call_scheme: Option<CallScheme>,
         take_l64: bool,
         take_stipend: bool,
         context: Context,
     ) -> Capture<(ExitReason, Vec<u8>), Infallible> {
+        let gas_before = self.gas_left();
+        self.tracer.start_call(
+            code_address,
+            context.clone(),
+            gas_before,
+            input.clone(),
+            call_scheme,
+        );
+        match self._call_inner(
+            code_address,
+            transfer,
+            input,
+            target_gas,
+            call_scheme,
+            take_l64,
+            take_stipend,
+            context,
+        ) {
+            Capture::Exit((reason, output)) => {
+                self.tracer.end_subroutine(
+                    gas_before.saturating_sub(self.gas_left()),
+                    None,
+                    output.clone(),
+                    reason.clone(),
+                );
+                Capture::Exit((reason, output))
+            }
+            Capture::Trap(_) => unreachable!(),
+        }
+    }
+
+    fn _call_inner(
+        &mut self,
+        code_address: H160,
+        transfer: Option<Transfer>,
+        input: Vec<u8>,
+        target_gas: Option<u64>,
+        // None when transaction_call called
+        call_scheme: Option<CallScheme>,
+        take_l64: bool,
+        take_stipend: bool,
+        context: Context,
+    ) -> Capture<(ExitReason, Vec<u8>), Infallible> {
+        let is_static = call_scheme.map_or(false, |c| c == CallScheme::StaticCall);
         macro_rules! try_or_fail {
             ( $e:expr ) => {
                 match $e {
@@ -490,14 +568,7 @@ impl<'config, 'precompile, S: StackState<'config>> StackExecutor<'config, 'preco
         }
 
         let after_gas = if take_l64 && self.config.call_l64_after_gas {
-            if self.config.estimate {
-                let initial_after_gas = self.state.metadata().gasometer.gas();
-                let diff = initial_after_gas - l64(initial_after_gas);
-                try_or_fail!(self.state.metadata_mut().gasometer.record_cost(diff));
-                self.state.metadata().gasometer.gas()
-            } else {
-                l64(self.state.metadata().gasometer.gas())
-            }
+            l64(self.state.metadata().gasometer.gas())
         } else {
             self.state.metadata().gasometer.gas()
         };
@@ -538,7 +609,7 @@ impl<'config, 'precompile, S: StackState<'config>> StackExecutor<'config, 'preco
         if let Some(ret) = self
             .precompile
             .as_mut()
-            .and_then(|e| e(code_address, &input, Some(gas_limit), &context))
+            .and_then(|e| e(code_address, &input, Some(gas_limit), call_scheme, &context))
         {
             return match ret {
                 Ok((s, out, cost)) => {
@@ -703,7 +774,7 @@ impl<'config, 'precompile, S: StackState<'config>> Handler
         transfer: Option<Transfer>,
         input: Vec<u8>,
         target_gas: Option<u64>,
-        is_static: bool,
+        call_scheme: CallScheme,
         context: Context,
     ) -> Capture<(ExitReason, Vec<u8>), Self::CallInterrupt> {
         self.call_inner(
@@ -711,7 +782,7 @@ impl<'config, 'precompile, S: StackState<'config>> Handler
             transfer,
             input,
             target_gas,
-            is_static,
+            Some(call_scheme),
             true,
             true,
             context,
@@ -746,5 +817,171 @@ impl<'config, 'precompile, S: StackState<'config>> Handler
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::backend::{MemoryAccount, MemoryBackend, MemoryVicinity};
+    use crate::executor::{MemoryStackState, StackExecutor, StackSubstateMetadata};
+    use evm_runtime::Config;
+    use primitive_types::{H160, U256};
+    use std::{collections::BTreeMap, str::FromStr};
+
+    fn dummy_account() -> MemoryAccount {
+        MemoryAccount {
+            nonce: U256::one(),
+            balance: U256::from(10000000),
+            storage: BTreeMap::new(),
+            code: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn test_call_inner_with_estimate() {
+        let config_estimate = Config {
+            estimate: true,
+            ..Config::istanbul()
+        };
+        let config_no_estimate = Config::istanbul();
+
+        let vicinity = MemoryVicinity {
+            gas_price: U256::zero(),
+            origin: H160::default(),
+            block_hashes: Vec::new(),
+            block_number: Default::default(),
+            block_coinbase: Default::default(),
+            block_timestamp: Default::default(),
+            block_difficulty: Default::default(),
+            block_gas_limit: Default::default(),
+            chain_id: U256::one(),
+        };
+
+        let mut state = BTreeMap::new();
+        let caller_address = H160::from_str("0xf000000000000000000000000000000000000000").unwrap();
+        let contract_address =
+            H160::from_str("0x1000000000000000000000000000000000000000").unwrap();
+        state.insert(caller_address, dummy_account());
+        state.insert(
+            contract_address,
+            MemoryAccount {
+                nonce: U256::one(),
+                balance: U256::from(10000000),
+                storage: BTreeMap::new(),
+                // proxy contract code
+                code: hex::decode("608060405260043610610041576000357c0100000000000000000000000000000000000000000000000000000000900463ffffffff1680632da4e75c1461006a575b6000543660008037600080366000845af43d6000803e8060008114610065573d6000f35b600080fd5b34801561007657600080fd5b506100ab600480360381019080803573ffffffffffffffffffffffffffffffffffffffff1690602001909291905050506100ad565b005b600160009054906101000a900473ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff163373ffffffffffffffffffffffffffffffffffffffff1614151561010957600080fd5b806000806101000a81548173ffffffffffffffffffffffffffffffffffffffff021916908373ffffffffffffffffffffffffffffffffffffffff160217905550505600a165627a7a72305820f58232a59d38bc7ca7fcefa0993365e57f4cd4e8b3fa746e0d170c5b47a787920029").unwrap(),
+            }
+        );
+
+        let call_data =
+            hex::decode("6057361d0000000000000000000000000000000000000000000000000000000000000000")
+                .unwrap();
+        let transact_call = |config, gas_limit| {
+            let backend = MemoryBackend::new(&vicinity, state.clone());
+            let metadata = StackSubstateMetadata::new(gas_limit, config);
+            let state = MemoryStackState::new(metadata, &backend);
+            let mut executor = StackExecutor::new(state, config);
+
+            let _reason = executor.transact_call(
+                caller_address,
+                contract_address,
+                U256::zero(),
+                call_data.clone(),
+                gas_limit,
+            );
+            executor.used_gas()
+        };
+        {
+            let gas_limit = u64::MAX;
+            let gas_used_estimate = transact_call(&config_estimate, gas_limit);
+            let gas_used_no_estimate = transact_call(&config_no_estimate, gas_limit);
+            assert!(gas_used_estimate >= gas_used_no_estimate);
+            assert!(gas_used_estimate < gas_used_no_estimate + gas_used_no_estimate / 4,
+                "gas_used with estimate=true is too high, gas_used_estimate={}, gas_used_no_estimate={}",
+                gas_used_estimate, gas_used_no_estimate);
+        }
+
+        {
+            let gas_limit: u64 = 300_000_000;
+            let gas_used_estimate = transact_call(&config_estimate, gas_limit);
+            let gas_used_no_estimate = transact_call(&config_no_estimate, gas_limit);
+            assert!(gas_used_estimate >= gas_used_no_estimate);
+            assert!(gas_used_estimate < gas_used_no_estimate + gas_used_no_estimate / 4,
+                "gas_used with estimate=true is too high, gas_used_estimate={}, gas_used_no_estimate={}",
+                gas_used_estimate, gas_used_no_estimate);
+        }
+    }
+
+    #[test]
+    fn test_create_inner_with_estimate() {
+        let config_estimate = Config {
+            estimate: true,
+            ..Config::istanbul()
+        };
+        let config_no_estimate = Config::istanbul();
+
+        let vicinity = MemoryVicinity {
+            gas_price: U256::zero(),
+            origin: H160::default(),
+            block_hashes: Vec::new(),
+            block_number: Default::default(),
+            block_coinbase: Default::default(),
+            block_timestamp: Default::default(),
+            block_difficulty: Default::default(),
+            block_gas_limit: Default::default(),
+            chain_id: U256::one(),
+        };
+
+        let mut state = BTreeMap::new();
+        let caller_address = H160::from_str("0xf000000000000000000000000000000000000000").unwrap();
+        let contract_address =
+            H160::from_str("0x1000000000000000000000000000000000000000").unwrap();
+        state.insert(caller_address, dummy_account());
+        state.insert(
+            contract_address,
+            MemoryAccount {
+                nonce: U256::one(),
+                balance: U256::from(10000000),
+                storage: BTreeMap::new(),
+                // creator contract code
+                code: hex::decode("6080604052348015600f57600080fd5b506004361060285760003560e01c8063fb971d0114602d575b600080fd5b60336035565b005b60006040516041906062565b604051809103906000f080158015605c573d6000803e3d6000fd5b50905050565b610170806100708339019056fe608060405234801561001057600080fd5b50610150806100206000396000f3fe608060405234801561001057600080fd5b50600436106100365760003560e01c80632e64cec11461003b5780636057361d14610059575b600080fd5b610043610075565b60405161005091906100a1565b60405180910390f35b610073600480360381019061006e91906100ed565b61007e565b005b60008054905090565b8060008190555050565b6000819050919050565b61009b81610088565b82525050565b60006020820190506100b66000830184610092565b92915050565b600080fd5b6100ca81610088565b81146100d557600080fd5b50565b6000813590506100e7816100c1565b92915050565b600060208284031215610103576101026100bc565b5b6000610111848285016100d8565b9150509291505056fea264697066735822122044f0132d3ce474198482cc3f79c22d7ed4cece5e1dcbb2c7cb533a23068c5d6064736f6c634300080d0033a2646970667358221220a7ba80fb064accb768e9e7126cd0b69e3889378082d659ad1b17317e6d578b9a64736f6c634300080d0033").unwrap(),
+            }
+        );
+
+        let call_data = hex::decode("fb971d01").unwrap();
+        let transact_call = |config, gas_limit| {
+            let backend = MemoryBackend::new(&vicinity, state.clone());
+            let metadata = StackSubstateMetadata::new(gas_limit, config);
+            let state = MemoryStackState::new(metadata, &backend);
+            let mut executor = StackExecutor::new(state, config);
+
+            let _reason = executor.transact_call(
+                caller_address,
+                contract_address,
+                U256::zero(),
+                call_data.clone(),
+                gas_limit,
+            );
+            executor.used_gas()
+        };
+        {
+            let gas_limit = u64::MAX;
+            let gas_used_estimate = transact_call(&config_estimate, gas_limit);
+            let gas_used_no_estimate = transact_call(&config_no_estimate, gas_limit);
+            assert!(gas_used_estimate >= gas_used_no_estimate);
+            assert!(gas_used_estimate < gas_used_no_estimate + gas_used_no_estimate / 4,
+                    "gas_used with estimate=true is too high, gas_used_estimate={}, gas_used_no_estimate={}",
+                    gas_used_estimate, gas_used_no_estimate);
+        }
+
+        {
+            let gas_limit: u64 = 300_000_000;
+            let gas_used_estimate = transact_call(&config_estimate, gas_limit);
+            let gas_used_no_estimate = transact_call(&config_no_estimate, gas_limit);
+            assert!(gas_used_estimate >= gas_used_no_estimate);
+            assert!(gas_used_estimate < gas_used_no_estimate + gas_used_no_estimate / 4,
+                    "gas_used with estimate=true is too high, gas_used_estimate={}, gas_used_no_estimate={}",
+                    gas_used_estimate, gas_used_no_estimate);
+        }
     }
 }

@@ -4,5 +4,6 @@
 //! also handles the call stacks in EVM.
 
 mod stack;
+pub mod traces;
 
-pub use self::stack::{StackExecutor, MemoryStackState, StackState, StackSubstateMetadata};
+pub use self::stack::{MemoryStackState, StackExecutor, StackState, StackSubstateMetadata};
