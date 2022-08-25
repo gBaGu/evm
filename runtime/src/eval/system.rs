@@ -110,9 +110,9 @@ pub fn extcodecopy<H: Handler>(runtime: &mut Runtime, handler: &H) -> Control<H>
 	pop_u256!(runtime, memory_offset, code_offset, len);
 
 	try_or_fail!(runtime
-		.machine
-		.memory_mut()
-		.resize_offset(memory_offset, len));
+        .machine
+        .memory_mut()
+        .resize_offset(memory_offset, len));
 	match runtime.machine.memory_mut().copy_large(
 		memory_offset,
 		code_offset,
@@ -137,9 +137,9 @@ pub fn returndatacopy<H: Handler>(runtime: &mut Runtime) -> Control<H> {
 	pop_u256!(runtime, memory_offset, data_offset, len);
 
 	try_or_fail!(runtime
-		.machine
-		.memory_mut()
-		.resize_offset(memory_offset, len));
+        .machine
+        .memory_mut()
+        .resize_offset(memory_offset, len));
 	if data_offset
 		.checked_add(len)
 		.map(|l| l > U256::from(runtime.return_data_buffer.len()))
@@ -348,13 +348,13 @@ pub fn call<H: Handler>(runtime: &mut Runtime, scheme: CallScheme, handler: &mut
 	pop_u256!(runtime, in_offset, in_len, out_offset, out_len);
 
 	try_or_fail!(runtime
-		.machine
-		.memory_mut()
-		.resize_offset(in_offset, in_len));
+        .machine
+        .memory_mut()
+        .resize_offset(in_offset, in_len));
 	try_or_fail!(runtime
-		.machine
-		.memory_mut()
-		.resize_offset(out_offset, out_len));
+        .machine
+        .memory_mut()
+        .resize_offset(out_offset, out_len));
 
 	let input = if in_len == U256::zero() {
 		Vec::new()
@@ -387,13 +387,13 @@ pub fn call<H: Handler>(runtime: &mut Runtime, scheme: CallScheme, handler: &mut
 		Some(Transfer {
 			source: runtime.context.address,
 			target: to.into(),
-			value,
+			value: value.into(),
 		})
 	} else if scheme == CallScheme::CallCode {
 		Some(Transfer {
 			source: runtime.context.address,
 			target: runtime.context.address,
-			value,
+			value: value.into(),
 		})
 	} else {
 		None
@@ -404,7 +404,7 @@ pub fn call<H: Handler>(runtime: &mut Runtime, scheme: CallScheme, handler: &mut
 		transfer,
 		input,
 		gas,
-		scheme == CallScheme::StaticCall,
+		scheme,
 		context,
 	) {
 		Capture::Exit((reason, return_data)) => {
