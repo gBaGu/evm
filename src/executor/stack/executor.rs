@@ -1446,7 +1446,7 @@ mod tests {
 		let transact_call = |config, gas_limit| {
 			let backend = MemoryBackend::new(&vicinity, state.clone());
 			let metadata = StackSubstateMetadata::new(gas_limit, config);
-			let state = MemoryStackState::new(metadata, &backend);
+			let state = MemoryStackState::new(metadata, &backend, false);
 			let precompiles = BTreeMap::new();
 			let mut executor = StackExecutor::new_with_precompiles(state, config, &precompiles);
 
@@ -1518,7 +1518,7 @@ mod tests {
 		let transact_call = |config, gas_limit| {
 			let backend = MemoryBackend::new(&vicinity, state.clone());
 			let metadata = StackSubstateMetadata::new(gas_limit, config);
-			let state = MemoryStackState::new(metadata, &backend);
+			let state = MemoryStackState::new(metadata, &backend, false);
 			let precompiles = BTreeMap::new();
 			let mut executor = StackExecutor::new_with_precompiles(state, config, &precompiles);
 

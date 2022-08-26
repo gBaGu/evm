@@ -24,6 +24,7 @@ pub struct MemoryStackSubstate<'config> {
 	accounts: BTreeMap<H160, MemoryStackAccount>,
 	storages: BTreeMap<(H160, H256), H256>,
 	deletes: BTreeSet<H160>,
+	clear_logs_on_error: bool,
 }
 
 impl<'config> MemoryStackSubstate<'config> {
@@ -35,7 +36,12 @@ impl<'config> MemoryStackSubstate<'config> {
 			accounts: BTreeMap::new(),
 			storages: BTreeMap::new(),
 			deletes: BTreeSet::new(),
+			clear_logs_on_error: false,
 		}
+	}
+
+	pub fn enable_clear_logs_on_error(&mut self) {
+		self.clear_logs_on_error = true;
 	}
 
 	pub fn logs(&self) -> &[Log] {
@@ -120,6 +126,7 @@ impl<'config> MemoryStackSubstate<'config> {
 			accounts: BTreeMap::new(),
 			storages: BTreeMap::new(),
 			deletes: BTreeSet::new(),
+			clear_logs_on_error: self.clear_logs_on_error,
 		};
 		mem::swap(&mut entering, self);
 
@@ -161,6 +168,9 @@ impl<'config> MemoryStackSubstate<'config> {
 		mem::swap(&mut exited, self);
 
 		self.metadata.swallow_revert(exited.metadata)?;
+		if !self.clear_logs_on_error {
+			self.logs.append(&mut exited.logs);
+		}
 
 		Ok(())
 	}
@@ -170,6 +180,9 @@ impl<'config> MemoryStackSubstate<'config> {
 		mem::swap(&mut exited, self);
 
 		self.metadata.swallow_discard(exited.metadata)?;
+		if !self.clear_logs_on_error {
+			self.logs.append(&mut exited.logs);
+		}
 
 		Ok(())
 	}
@@ -548,11 +561,12 @@ impl<'backend, 'config, B: Backend> StackState<'config> for MemoryStackState<'ba
 }
 
 impl<'backend, 'config, B: Backend> MemoryStackState<'backend, 'config, B> {
-	pub fn new(metadata: StackSubstateMetadata<'config>, backend: &'backend B) -> Self {
-		Self {
-			backend,
-			substate: MemoryStackSubstate::new(metadata),
+	pub fn new(metadata: StackSubstateMetadata<'config>, backend: &'backend B, clear_logs_on_error: bool) -> Self {
+		let mut substate = MemoryStackSubstate::new(metadata);
+		if clear_logs_on_error {
+			substate.enable_clear_logs_on_error();
 		}
+		Self { backend, substate }
 	}
 
 	/// Returns a mutable reference to an account given its address

@@ -43,7 +43,7 @@ fn run_loop_contract() {
 
 	let backend = MemoryBackend::new(&vicinity, state);
 	let metadata = StackSubstateMetadata::new(u64::MAX, &config);
-	let state = MemoryStackState::new(metadata, &backend);
+	let state = MemoryStackState::new(metadata, &backend, false);
 	let precompiles = BTreeMap::new();
 	let mut executor = StackExecutor::new_with_precompiles(state, &config, &precompiles);
 
