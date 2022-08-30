@@ -83,6 +83,14 @@ pub fn gasprice<H: Handler>(runtime: &mut Runtime, handler: &H) -> Control<H> {
 	Control::Continue
 }
 
+pub fn base_fee<H: Handler>(runtime: &mut Runtime, handler: &H) -> Control<H> {
+	let mut ret = H256::default();
+	handler.block_base_fee_per_gas().to_big_endian(&mut ret[..]);
+	push!(runtime, ret);
+
+	Control::Continue
+}
+
 pub fn extcodesize<H: Handler>(runtime: &mut Runtime, handler: &H) -> Control<H> {
 	pop!(runtime, address);
 	push_u256!(runtime, handler.code_size(address.into()));
@@ -185,13 +193,27 @@ pub fn gaslimit<H: Handler>(runtime: &mut Runtime, handler: &H) -> Control<H> {
 
 pub fn sload<H: Handler>(runtime: &mut Runtime, handler: &H) -> Control<H> {
 	pop!(runtime, index);
-	push!(runtime, handler.storage(runtime.context.address, index));
+	let value = handler.storage(runtime.context.address, index);
+	push!(runtime, value);
+
+	event!(SLoad {
+		address: runtime.context.address,
+		index,
+		value
+	});
 
 	Control::Continue
 }
 
 pub fn sstore<H: Handler>(runtime: &mut Runtime, handler: &mut H) -> Control<H> {
 	pop!(runtime, index, value);
+
+	event!(SStore {
+		address: runtime.context.address,
+		index,
+		value
+	});
+
 	match handler.set_storage(runtime.context.address, index, value) {
 		Ok(()) => Control::Continue,
 		Err(e) => Control::Exit(e.into()),
@@ -280,7 +302,7 @@ pub fn create<H: Handler>(runtime: &mut Runtime, is_create2: bool, handler: &mut
 
 			match reason {
 				ExitReason::Succeed(_) => {
-					push!(runtime, create_address.into());
+					push!(runtime, create_address);
 					Control::Continue
 				}
 				ExitReason::Revert(_) => {
@@ -304,16 +326,12 @@ pub fn create<H: Handler>(runtime: &mut Runtime, is_create2: bool, handler: &mut
 	}
 }
 
-pub fn call<'config, H: Handler>(
-	runtime: &mut Runtime,
-	scheme: CallScheme,
-	handler: &mut H,
-) -> Control<H> {
+pub fn call<H: Handler>(runtime: &mut Runtime, scheme: CallScheme, handler: &mut H) -> Control<H> {
 	runtime.return_data_buffer = Vec::new();
 
 	pop_u256!(runtime, gas);
 	pop!(runtime, to);
-	let gas = if gas > U256::from(u64::max_value()) {
+	let gas = if gas > U256::from(u64::MAX) {
 		None
 	} else {
 		Some(gas.as_u64())
@@ -381,7 +399,14 @@ pub fn call<'config, H: Handler>(
 		None
 	};
 
-	match handler.call(to.into(), transfer, input, gas, scheme, context) {
+	match handler.call(
+		to.into(),
+		transfer,
+		input,
+		gas,
+		scheme,
+		context,
+	) {
 		Capture::Exit((reason, return_data)) => {
 			runtime.return_data_buffer = return_data;
 			let target_len = min(out_len, U256::from(runtime.return_data_buffer.len()));

@@ -16,6 +16,7 @@ pub struct Transfer {
 }
 
 /// EVM context handler.
+#[auto_impl::auto_impl(&mut, Box)]
 pub trait Handler {
 	/// Type of `CREATE` interrupt.
 	type CreateInterrupt;
@@ -57,6 +58,8 @@ pub trait Handler {
 	fn block_difficulty(&self) -> U256;
 	/// Get environmental gas limit.
 	fn block_gas_limit(&self) -> U256;
+	/// Environmental block base fee.
+	fn block_base_fee_per_gas(&self) -> U256;
 	/// Get environmental chain ID.
 	fn chain_id(&self) -> U256;
 
@@ -64,11 +67,18 @@ pub trait Handler {
 	fn exists(&self, address: H160) -> bool;
 	/// Check whether an address has already been deleted.
 	fn deleted(&self, address: H160) -> bool;
+	/// Checks if the address or (address, index) pair has been previously accessed
+	/// (or set in `accessed_addresses` / `accessed_storage_keys` via an access list
+	/// transaction).
+	/// References:
+	/// * <https://eips.ethereum.org/EIPS/eip-2929>
+	/// * <https://eips.ethereum.org/EIPS/eip-2930>
+	fn is_cold(&self, address: H160, index: Option<H256>) -> bool;
 
 	/// Set storage value of address at index.
 	fn set_storage(&mut self, address: H160, index: H256, value: H256) -> Result<(), ExitError>;
 	/// Create a log owned by address with given topics and data.
-	fn log(&mut self, address: H160, topcis: Vec<H256>, data: Vec<u8>) -> Result<(), ExitError>;
+	fn log(&mut self, address: H160, topics: Vec<H256>, data: Vec<u8>) -> Result<(), ExitError>;
 	/// Mark an address to be deleted, with funds transferred to target.
 	fn mark_delete(&mut self, address: H160, target: H160) -> Result<(), ExitError>;
 	/// Invoke a create operation.
@@ -107,7 +117,7 @@ pub trait Handler {
 		stack: &Stack,
 	) -> Result<(), ExitError>;
 	/// Handle other unknown external opcodes.
-	fn other(&mut self, _opcode: Opcode, _stack: &mut Machine) -> Result<(), ExitError> {
-		Err(ExitError::OutOfGas)
+	fn other(&mut self, opcode: Opcode, _stack: &mut Machine) -> Result<(), ExitError> {
+		Err(ExitError::InvalidCode(opcode))
 	}
 }

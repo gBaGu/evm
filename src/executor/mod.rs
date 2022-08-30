@@ -2,8 +2,8 @@
 //!
 //! Executors are structs that hook gasometer and the EVM core together. It
 //! also handles the call stacks in EVM.
+//!
+//! Currently only a stack-based (customizable) executor is provided.
 
-mod stack;
+pub mod stack;
 pub mod traces;
-
-pub use self::stack::{MemoryStackState, StackExecutor, StackState, StackSubstateMetadata};

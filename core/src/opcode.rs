@@ -1,5 +1,10 @@
 /// Opcode enum. One-to-one corresponding to an `u8` value.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[cfg_attr(
+	feature = "with-codec",
+	derive(codec::Encode, codec::Decode, scale_info::TypeInfo)
+)]
+#[cfg_attr(feature = "with-serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Opcode(pub u8);
 
 // Core opcodes.
@@ -166,6 +171,9 @@ impl Opcode {
 
 	/// `INVALID`
 	pub const INVALID: Opcode = Opcode(0xfe);
+
+	/// See [EIP-3541](https://github.com/ethereum/EIPs/blob/master/EIPS/eip-3541.md)
+	pub const EOFMAGIC: Opcode = Opcode(0xef);
 }
 
 // External opcodes
@@ -178,6 +186,8 @@ impl Opcode {
 	pub const BALANCE: Opcode = Opcode(0x31);
 	/// `SELFBALANCE`
 	pub const SELFBALANCE: Opcode = Opcode(0x47);
+	/// `BASEFEE`
+	pub const BASEFEE: Opcode = Opcode(0x48);
 	/// `ORIGIN`
 	pub const ORIGIN: Opcode = Opcode(0x32);
 	/// `CALLER`
@@ -242,7 +252,7 @@ impl Opcode {
 	/// Whether the opcode is a push opcode.
 	pub fn is_push(&self) -> Option<u8> {
 		let value = self.0;
-		if value >= 0x60 && value <= 0x7f {
+		if (0x60..=0x7f).contains(&value) {
 			Some(value - 0x60 + 1)
 		} else {
 			None
